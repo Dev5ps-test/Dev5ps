@@ -1,8 +1,9 @@
-﻿from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 import json
-import os
 import logging
 import time
 from multiprocessing import Queue
@@ -54,19 +55,41 @@ class TodoItem(BaseModel):
     completed: bool
 
 # JSON 파일 경로
-TODO_FILE = "todo.json"
+BASE_DIR = Path(__file__).resolve().parent
+TODO_FILE = BASE_DIR / "todo.json"
+INDEX_TEMPLATE = BASE_DIR / "templates" / "index.html"
 
 # JSON 파일에서 To-Do 항목 로드
 def load_todos():
-    if os.path.exists(TODO_FILE):
-        with open(TODO_FILE, "r") as file:
-            return json.load(file)
+    if TODO_FILE.exists():
+        try:
+            content = TODO_FILE.read_text(encoding="utf-8-sig").strip()
+            if not content:
+                return []
+            todos = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Todo data file is not valid JSON",
+            ) from exc
+
+        if not isinstance(todos, list):
+            raise HTTPException(
+                status_code=500,
+                detail="Todo data file must contain a JSON list",
+            )
+        return todos
     return []
 
 # JSON 파일에 To-Do 항목 저장
 def save_todos(todos):
-    with open(TODO_FILE, "w") as file:
-        json.dump(todos, file, indent=4)
+    TODO_FILE.write_text(json.dumps(todos, indent=4), encoding="utf-8")
+
+
+def todo_to_dict(todo: TodoItem):
+    if hasattr(todo, "model_dump"):
+        return todo.model_dump()
+    return todo.dict()
 
 # To-Do 목록 조회
 @app.get("/todos", response_model=list[TodoItem])
@@ -77,7 +100,7 @@ def get_todos():
 @app.post("/todos", response_model=TodoItem)
 def create_todo(todo: TodoItem):
     todos = load_todos()
-    todos.append(todo.dict())
+    todos.append(todo_to_dict(todo))
     save_todos(todos)
     return todo
 
@@ -87,7 +110,7 @@ def update_todo(todo_id: int, updated_todo: TodoItem):
     todos = load_todos()
     for todo in todos:
         if todo["id"] == todo_id:
-            todo.update(updated_todo.dict())
+            todo.update(todo_to_dict(updated_todo))
             save_todos(todos)
             return updated_todo
     raise HTTPException(status_code=404, detail="To-Do item not found!!!_SJ")
@@ -103,6 +126,10 @@ def delete_todo(todo_id: int):
 # HTML 파일 서빙
 @app.get("/", response_class=HTMLResponse)
 def read_root():
-    with open("templates/index.html", "r") as file:
-        content = file.read()
+    content = INDEX_TEMPLATE.read_text(encoding="utf-8")
     return HTMLResponse(content=content)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
