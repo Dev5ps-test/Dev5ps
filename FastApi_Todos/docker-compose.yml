@@ -8,7 +8,19 @@ services:
     container_name: FastApi-app
     ports:
       - "5002:8000"
+    depends_on:                   # Loki 컨테이너가 먼저 실행되도록 설정
+      - loki
+    environment:                  # 로그를 보낼 Loki 엔드포인트 설정
+      - LOKI_ENDPOINT=http://loki:3100/loki/api/v1/push
     networks:
+      - loadtest-net
+
+  loki:                           # 새로 추가된 Loki 서비스
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    networks:                     # FastAPI 앱과 통신하기 위해 같은 네트워크 할당
       - loadtest-net
 
   jmeter:
